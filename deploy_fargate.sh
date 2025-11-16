@@ -18,7 +18,7 @@ LAB_ROLE_ARN="arn:aws:iam::263323339622:role/LabRole"
 
 # Variables de Entorno (Tomadas de tu .env)
 JWT_SECRET="mi-secreto-para-la-hackathon-utec-2025-es-increible"
-AIRFLOW_API_URL="http://3.236.149.2:8081/api/v1"
+AIRFLOW_API_URL="http://35.174.174.28:8081/api/v1"
 WS_API_URL="wss://ufs7epfg85.execute-api.us-east-1.amazonaws.com/dev"
 WS_API_REGION="us-east-1"
 AIRFLOW_AUTH_TOKEN="YWlyZmxvdzphaXJmbG93"
