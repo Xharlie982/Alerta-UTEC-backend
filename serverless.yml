@@ -1,0 +1,123 @@
+# serverless.yml (para Alerta-UTEC-Backend)
+
+# 1. Configuración del Servicio (con tu 'org')
+org: carlosalith
+service: alerta-utec-backend-resources
+# NOTA: Este 'service' solo despliega recursos (tablas), no el código.
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: ${env:AWS_REGION, 'us-east-1'}
+
+  # --- ¡IMPLEMENTACIÓN CLAVE! ---
+  # Rol de IAM para AWS Academy (LabRole) con tu ID de cuenta
+  # Esto le da permisos a Serverless Framework para operar.
+  iam:
+    role: arn:aws:iam::263323339622:role/LabRole
+
+# 2. Mapeo de variables de tu .env
+custom:
+  usuariosTable: ${env:DDB_TABLE_USUARIOS, 'AlertaUTEC_Usuarios'}
+  incidentesTable: ${env:DDB_TABLE_INCIDENTES, 'AlertaUTEC_Incidentes'}
+  historialTable: ${env:DDB_TABLE_HISTORIAL, 'AlertaUTEC_Historial'}
+  conexionesWsTable: ${env:DDB_TABLE_CONEXIONES_WS, 'AlertaUTEC_ConexionesWS'}
+
+# 3. Definición de Recursos (SOLO las tablas)
+# Esto es lo que 'sls deploy' va a crear.
+resources:
+  Resources:
+    UsuariosTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.usuariosTable}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: email
+            AttributeType: S
+        KeySchema:
+          - AttributeName: email
+            KeyType: HASH
+        SSESpecification:
+          SSEEnabled: true
+        Tags:
+          - Key: Project
+            Value: AlertaUTEC
+
+    IncidentesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.incidentesTable}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: estado
+            AttributeType: S
+          - AttributeName: creadoEn
+            AttributeType: N
+          - AttributeName: reportadoPor
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: IncidentesByEstado
+            KeySchema:
+              - AttributeName: estado
+                KeyType: HASH
+              - AttributeName: creadoEn
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+          - IndexName: IncidentesByReportadoPor
+            KeySchema:
+              - AttributeName: reportadoPor
+                KeyType: HASH
+              - AttributeName: creadoEn
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+        SSESpecification:
+          SSEEnabled: true
+        Tags:
+          - Key: Project
+            Value: AlertaUTEC
+
+    HistorialTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.historialTable}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: idIncidente
+            AttributeType: S
+          - AttributeName: timestamp
+            AttributeType: N
+        KeySchema:
+          - AttributeName: idIncidente
+            KeyType: HASH
+          - AttributeName: timestamp
+            KeyType: RANGE
+        SSESpecification:
+          SSEEnabled: true
+        Tags:
+          - Key: Project
+            Value: AlertaUTEC
+
+    ConexionesWsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.conexionesWsTable}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: connectionId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: connectionId
+            KeyType: HASH
+        SSESpecification:
+          SSEEnabled: true
+        Tags:
+          - Key: Project
+            Value: AlertaUTEC
