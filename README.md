@@ -16,6 +16,49 @@ Backend para el proyecto **AlertaUTEC**, una plataforma para reporte y gestión 
 - Credenciales de AWS configuradas (por ejemplo, variables de entorno o `~/.aws/credentials`)
 - Acceso a las tablas DynamoDB definidas en `.env`
 
+## Estructura del proyecto
+
+```text
+.
+├─ Dockerfile
+├─ package-lock.json
+├─ package.json
+├─ README.md
+├─ serverless.yml
+├─ .gitignore
+└─ src/
+   ├─ server.js
+   ├─ app.js
+   ├─ config/
+   │  ├─ env.js
+   │  └─ dynamoClient.js
+   ├─ middleware/
+   │  ├─ authMiddleware.js
+   │  ├─ requireRole.js
+   │  └─ errorHandler.js
+   ├─ routes/
+   │  ├─ auth.routes.js
+   │  └─ incidentes.routes.js
+   ├─ controllers/
+   │  ├─ authController.js
+   │  └─ incidentesController.js
+   ├─ services/
+   │  ├─ authService.js
+   │  ├─ incidentesService.js
+   │  ├─ historialService.js
+   │  ├─ airflowService.js
+   │  └─ websocketNotifyService.js
+   ├─ repositories/
+   │  ├─ usuariosRepository.js
+   │  ├─ incidentesRepository.js
+   │  └─ historialRepository.js
+   └─ utils/
+      ├─ jwt.js
+      ├─ roles.js
+      ├─ time.js
+      └─ errors.js
+```
+
 ## Configuración
 
 1. Instalar dependencias:
@@ -24,20 +67,26 @@ Backend para el proyecto **AlertaUTEC**, una plataforma para reporte y gestión 
    npm install
    ```
 
-2. Crear un archivo `.env` basado en `.env.example` y completar los valores:
+2. Crear un archivo `.env` en la raíz del proyecto con al menos estas variables:
 
    ```bash
-   copy .env.example .env   # en Windows PowerShell / CMD
-   # o
-   cp .env.example .env     # en bash
+   PORT=8080
+   NODE_ENV=development
+   AWS_REGION=us-east-1
+
+   JWT_SECRET=CAMBIA_ESTE_SECRETO
+
+   DDB_TABLE_USUARIOS=AlertaUTEC_Usuarios
+   DDB_TABLE_INCIDENTES=AlertaUTEC_Incidentes
+   DDB_TABLE_HISTORIAL=AlertaUTEC_Historial
+   DDB_TABLE_CONEXIONES_WS=AlertaUTEC_ConexionesWS
+
+   AIRFLOW_API_URL=http://airflow-service.internal/api
+   WS_API_GATEWAY_URL=https://xxxxxx.execute-api.region.amazonaws.com/prod
+   WS_API_REGION=us-east-1
    ```
 
-3. Asegúrate de que las tablas DynamoDB existen:
-
-   - `DDB_TABLE_USUARIOS`
-   - `DDB_TABLE_INCIDENTES`
-   - `DDB_TABLE_HISTORIAL`
-   - `DDB_TABLE_CONEXIONES_WS` (solo futura Fase 2)
+3. Asegúrate de que las tablas DynamoDB existen con esos nombres.
 
 ## Ejecutar en local
 
@@ -105,5 +154,3 @@ El servidor se levantará en `http://localhost:${PORT}` (por defecto `8080`).
 
 - **Fase 2 (WebSocket)**: `websocketNotifyService` contiene stubs que solo hacen `console.log`. En el futuro se integrará con **Amazon API Gateway WebSocket** y `ApiGatewayManagementApi`, usando la tabla `DDB_TABLE_CONEXIONES_WS`.
 - **Fase 3 (Airflow)**: `airflowService` contiene un stub que solo hace `console.log`. En el futuro llamará al DAG `clasificar_y_notificar` en Airflow vía HTTP usando `AIRFLOW_API_URL`.
-
-# Alerta-UTEC-backend
