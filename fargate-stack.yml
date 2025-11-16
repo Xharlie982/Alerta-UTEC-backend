@@ -30,6 +30,12 @@ Parameters:
     Type: String
   WsApiRegion:
     Type: String
+  RegCodeTrabajador:
+    Type: String
+    NoEcho: true
+  RegCodeSupervisor:
+    Type: String
+    NoEcho: true
 
 Resources:
   # 1. Log Group para el contenedor
@@ -130,6 +136,10 @@ Resources:
               Value: !Ref WsApiRegion
             - Name: AIRFLOW_AUTH_TOKEN
               Value: !Ref AirflowAuthToken
+            - Name: REG_CODE_TRABAJADOR
+              Value: !Ref RegCodeTrabajador
+            - Name: REG_CODE_SUPERVISOR
+              Value: !Ref RegCodeSupervisor
 
   # 7. El Servicio ECS (Mantiene la tarea corriendo)
   Service:

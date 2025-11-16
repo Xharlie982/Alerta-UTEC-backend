@@ -22,6 +22,8 @@ AIRFLOW_API_URL="http://3.236.149.2:8081/api/v1"
 WS_API_URL="wss://ufs7epfg85.execute-api.us-east-1.amazonaws.com/dev"
 WS_API_REGION="us-east-1"
 AIRFLOW_AUTH_TOKEN="YWlyZmxvdzphaXJmbG93"
+REG_CODE_TRABAJADOR="UTEC-STAFF-2025"
+REG_CODE_SUPERVISOR="UTEC-ADMIN-SUPER-SECRET"
 
 # --- 2. SCRIPT DE DESPLIEGUE ---
 
@@ -61,7 +63,9 @@ aws cloudformation deploy \
     AirflowApiUrl="${AIRFLOW_API_URL}" \
     WsApiUrl="${WS_API_URL}" \
     WsApiRegion="${WS_API_REGION}" \
-    AirflowAuthToken="${AIRFLOW_AUTH_TOKEN}"
+    AirflowAuthToken="${AIRFLOW_AUTH_TOKEN}" \
+    RegCodeTrabajador="${REG_CODE_TRABAJADOR}" \
+    RegCodeSupervisor="${REG_CODE_SUPERVISOR}"
 
 echo "[7/7] ¡Éxito! Obteniendo la URL de tu nuevo servicio..."
 aws cloudformation describe-stacks \

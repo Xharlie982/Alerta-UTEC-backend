@@ -15,7 +15,9 @@ const requiredEnvVars = [
   'AIRFLOW_API_URL',
   'WS_API_GATEWAY_URL',
   'WS_API_REGION',
-  'AIRFLOW_AUTH_TOKEN'
+  'AIRFLOW_AUTH_TOKEN',
+  'REG_CODE_TRABAJADOR',
+  'REG_CODE_SUPERVISOR'
 ];
 
 const missing = requiredEnvVars.filter((key) => !process.env[key]);
@@ -41,6 +43,8 @@ export const env = {
   WS_API_GATEWAY_URL: process.env.WS_API_GATEWAY_URL,
   WS_API_REGION: process.env.WS_API_REGION,
   AIRFLOW_AUTH_TOKEN: process.env.AIRFLOW_AUTH_TOKEN,
+  REG_CODE_TRABAJADOR: process.env.REG_CODE_TRABAJADOR,
+  REG_CODE_SUPERVISOR: process.env.REG_CODE_SUPERVISOR,
 
   // Nombres de GSIs (asumimos estos nombres en la infraestructura)
   INCIDENTES_GSI_BY_ESTADO: 'IncidentesByEstado',

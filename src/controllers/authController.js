@@ -18,4 +18,27 @@ export async function login(req, res, next) {
   }
 }
 
+// Registro de usuarios con códigos de seguridad por rol
+export async function register(req, res, next) {
+  try {
+    const { email, password, nombre, rol, registrationCode } = req.body || {};
+
+    if (!email || !password || !nombre || !rol) {
+      throw createError(400, 'Email, password, nombre y rol son requeridos');
+    }
+
+    const nuevoUsuario = await authService.register(
+      email,
+      password,
+      nombre,
+      rol,
+      registrationCode
+    );
+
+    res.status(201).json(nuevoUsuario);
+  } catch (err) {
+    next(err);
+  }
+}
+
 
