@@ -8,10 +8,8 @@ provider:
   runtime: nodejs20.x
   region: ${env:AWS_REGION, 'us-east-1'}
 
-  # --- AÑADE ESTAS DOS LÍNEAS AQUÍ ---
   useDotenv: true
   dotenvPath: ../.env
-  # -----------------------------------
 
   # Usamos el mismo rol de AWS Academy
   iam:
