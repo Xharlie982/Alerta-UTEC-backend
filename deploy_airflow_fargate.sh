@@ -12,7 +12,7 @@ REPO_NAME="alerta-utec-airflow"
 # ¡Nombre de bucket único con tu prefijo!
 S3_BUCKET_NAME="piglets-airflow-dags-utec-2025"
 
-# --- Rutas a los nuevos archivos ---
+# --- Rutas a los nuevos archivos (que están en la subcarpeta) ---
 SCRIPT_DIR="airflow-deployment"
 DAG_FILE="${SCRIPT_DIR}/clasificar_incidente_dag.py"
 DOCKERFILE="${SCRIPT_DIR}/airflow.Dockerfile"
@@ -20,10 +20,11 @@ STACK_FILE="${SCRIPT_DIR}/airflow-fargate-stack.yml"
 
 # --- Reutilizamos la configuración de red del backend ---
 echo "[1/7] Extrayendo configuración de red de deploy_fargate.sh..."
-VPC_ID=$(grep -oP 'VPC_ID="\K[^"]+' deploy_fargate.sh)
-SUBNET_IDS=$(grep -oP 'SUBNET_IDS="\K[^"]+' deploy_fargate.sh)
-SECURITY_GROUP=$(grep -oP 'SECURITY_GROUP="\K[^"]+' deploy_fargate.sh)
-LAB_ROLE_ARN=$(grep -oP 'LAB_ROLE_ARN="\K[^"]+' deploy_fargate.sh)
+# (Buscamos el script del backend en la carpeta actual, "./")
+VPC_ID=$(grep -oP 'VPC_ID="\K[^"]+' ./deploy_fargate.sh)
+SUBNET_IDS=$(grep -oP 'SUBNET_IDS="\K[^"]+' ./deploy_fargate.sh)
+SECURITY_GROUP=$(grep -oP 'SECURITY_GROUP="\K[^"]+' ./deploy_fargate.sh)
+LAB_ROLE_ARN=$(grep -oP 'LAB_ROLE_ARN="\K[^"]+' ./deploy_fargate.sh)
 
 if [ -z "$VPC_ID" ] || [ -z "$SUBNET_IDS" ]; then
   echo "ERROR: No se pudieron encontrar VPC_ID o SUBNET_IDS en deploy_fargate.sh"
@@ -48,6 +49,7 @@ aws ecr create-repository --repository-name "${REPO_NAME}" --region "${AWS_REGIO
 aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
 # Usamos el Dockerfile específico de Airflow
+# El "." al final es importante, significa "construir en el directorio actual"
 docker build -t "${REPO_NAME}:latest" -f "${DOCKERFILE}" .
 docker tag "${REPO_NAME}:latest" "${ECR_URI}:latest"
 docker push "${ECR_URI}:latest"
