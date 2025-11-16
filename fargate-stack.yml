@@ -1,0 +1,154 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Despliegue de AlertaUTEC Backend en ECS Fargate'
+
+Parameters:
+  VpcId:
+    Type: String
+  SubnetIds:
+    Type: CommaDelimitedList
+  SecurityGroupId:
+    Type: String
+  ImageUri:
+    Type: String
+  
+  # Roles (reutilizamos el LabRole)
+  TaskRoleArn:
+    Type: String
+  ExecutionRoleArn:
+    Type: String
+
+  # Variables de Entorno
+  JwtSecret:
+    Type: String
+    NoEcho: true
+  AirflowApiUrl:
+    Type: String
+  WsApiUrl:
+    Type: String
+  WsApiRegion:
+    Type: String
+
+Resources:
+  # 1. Log Group para el contenedor
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/alerta-utec-backend
+      RetentionInDays: 7
+
+  # 2. El Cluster ECS
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: alerta-utec-cluster
+
+  # 3. El Application Load Balancer (ALB)
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: alerta-utec-alb
+      Subnets: !Ref SubnetIds
+      SecurityGroups:
+        - !Ref SecurityGroupId
+      Scheme: internet-facing
+
+  # 4. El "Target Group" al que el ALB enviará tráfico
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: alerta-utec-tg
+      VpcId: !Ref VpcId
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /health # ¡Usa nuestro endpoint de healthcheck!
+      Matcher:
+        HttpCode: '200'
+
+  # 5. El "Listener" del ALB (puerto 80)
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # 6. La Definición de Tarea (El "plano" de Fargate)
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: alerta-utec-backend-task
+      Cpu: 512
+      Memory: 1024
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      # ¡Usamos el LabRole!
+      ExecutionRoleArn: !Ref ExecutionRoleArn
+      TaskRoleArn: !Ref TaskRoleArn
+      ContainerDefinitions:
+        - Name: alerta-utec-backend
+          Image: !Ref ImageUri
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: ecs
+          # ¡Inyectamos las variables de entorno!
+          Environment:
+            - Name: PORT
+              Value: '8080'
+            - Name: NODE_ENV
+              Value: production
+            - Name: AWS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: JWT_SECRET
+              Value: !Ref JwtSecret
+            - Name: DDB_TABLE_USUARIOS
+              Value: AlertaUTEC_Usuarios
+            - Name: DDB_TABLE_INCIDENTES
+              Value: AlertaUTEC_Incidentes
+            - Name: DDB_TABLE_HISTORIAL
+              Value: AlertaUTEC_Historial
+            - Name: DDB_TABLE_CONEXIONES_WS
+              Value: AlertaUTEC_ConexionesWS
+            - Name: AIRFLOW_API_URL
+              Value: !Ref AirflowApiUrl
+            - Name: WS_API_GATEWAY_URL
+              Value: !Ref WsApiUrl
+            - Name: WS_API_REGION
+              Value: !Ref WsApiRegion
+
+  # 7. El Servicio ECS (Mantiene la tarea corriendo)
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: Listener
+    Properties:
+      ServiceName: alerta-utec-backend-service
+      Cluster: !Ref Cluster
+      DesiredCount: 1
+      LaunchType: FARGATE
+      PlatformVersion: LATEST
+      TaskDefinition: !Ref TaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref SubnetIds
+          SecurityGroups:
+            - !Ref SecurityGroupId
+          AssignPublicIp: ENABLED
+      LoadBalancers:
+        - TargetGroupArn: !Ref TargetGroup
+          ContainerName: alerta-utec-backend
+          ContainerPort: 8080
+
+Outputs:
+  ALBDNS:
+    Description: "URL pública del Application Load Balancer"
+    Value: !GetAtt LoadBalancer.DNSName
