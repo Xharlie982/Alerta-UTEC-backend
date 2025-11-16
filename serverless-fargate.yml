@@ -1,5 +1,4 @@
-# serverless-fargate.yml
-# Despliegue del Backend de AlertaUTEC en ECS Fargate
+service: alerta-utec-fargate-backend
 
 plugins:
   - serverless-fargate-plugin
