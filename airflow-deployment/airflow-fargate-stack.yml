@@ -1,0 +1,185 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Despliegue de Airflow en Fargate (Demo Multi-contenedor)'
+
+Parameters:
+  VpcId:
+    Type: String
+  SubnetIds:
+    Type: CommaDelimitedList
+  SecurityGroupId:
+    Type: String
+  TaskRoleArn:
+    Type: String
+  ExecutionRoleArn:
+    Type: String
+  ImageUri:
+    Type: String # URL de la imagen en ECR
+  S3DagsPath:
+    Type: String # ej: s3://mi-bucket/dags
+
+Resources:
+  # 1. Log Group para CloudWatch
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/alerta-utec-airflow
+      RetentionInDays: 7
+
+  # 2. El Application Load Balancer (ALB)
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: alerta-utec-airflow-alb
+      Subnets: !Ref SubnetIds
+      SecurityGroups:
+        - !Ref SecurityGroupId
+      Scheme: internet-facing
+
+  # 3. El Target Group (puerto 8080 del webserver)
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: alerta-utec-airflow-tg
+      VpcId: !Ref VpcId
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /health # Healthcheck nativo de Airflow
+      Matcher:
+        HttpCode: '200'
+
+  # 4. El Listener del ALB (en el puerto 8081)
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 8081 # Usamos 8081 para no chocar con el 8080 del backend
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # 5. La Definición de Tarea (El "docker-compose" de Fargate)
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: alerta-utec-airflow-task
+      Cpu: 1024       # 1 vCPU
+      Memory: 3072    # 3 GB (Airflow es pesado)
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Ref ExecutionRoleArn
+      TaskRoleArn: !Ref TaskRoleArn
+      
+      # --- DEFINICIÓN DE LOS 4 CONTENEDORES ---
+      ContainerDefinitions:
+        # Contenedor 1: Postgres (Base de datos)
+        - Name: postgres
+          Image: postgres:13
+          PortMappings:
+            - ContainerPort: 5432
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: postgres
+          Environment:
+            - Name: POSTGRES_USER
+              Value: airflow
+            - Name: POSTGRES_PASSWORD
+              Value: airflow
+            - Name: POSTGRES_DB
+              Value: airflow
+
+        # Contenedor 2: Redis (Cola de mensajes)
+        - Name: redis
+          Image: redis:latest
+          PortMappings:
+            - ContainerPort: 6379
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: redis
+        
+        # Contenedor 3: Airflow Webserver (UI y API)
+        - Name: airflow-webserver
+          Image: !Ref ImageUri
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080 # Puerto expuesto al ALB
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: airflow-webserver
+          Environment:
+            - Name: AIRFLOW__CORE__EXECUTOR
+              Value: CeleryExecutor
+            - Name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              Value: postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
+            - Name: AIRFLOW__CELERY__BROKER_URL
+              Value: redis://localhost:6379/0
+            - Name: AIRFLOW__CELERY__RESULT_BACKEND
+              Value: db+postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
+            - Name: AIRFLOW__CORE__DAGS_FOLDER
+              Value: !Ref S3DagsPath
+            - Name: AIRFLOW__CORE__LOAD_EXAMPLES
+              Value: 'False'
+          Command: [ "webserver" ]
+
+        # Contenedor 4: Airflow Scheduler (El cerebro)
+        - Name: airflow-scheduler
+          Image: !Ref ImageUri
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: airflow-scheduler
+          Environment:
+            - Name: AIRFLOW__CORE__EXECUTOR
+              Value: CeleryExecutor
+            - Name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              Value: postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
+            - Name: AIRFLOW__CELERY__BROKER_URL
+              Value: redis://localhost:6379/0
+            - Name: AIRFLOW__CELERY__RESULT_BACKEND
+              Value: db+postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
+            - Name: AIRFLOW__CORE__DAGS_FOLDER
+              Value: !Ref S3DagsPath
+            - Name: AIRFLOW__CORE__LOAD_EXAMPLES
+              Value: 'False'
+          Command: [ "scheduler" ]
+
+  # 6. El Servicio ECS (Ejecuta la Tarea y la conecta al ALB)
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: Listener
+    Properties:
+      ServiceName: alerta-utec-airflow-service
+      Cluster: alerta-utec-cluster # Usamos el MISMO cluster que tu backend
+      DesiredCount: 1
+      LaunchType: FARGATE
+      PlatformVersion: LATEST
+      TaskDefinition: !Ref TaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref SubnetIds
+          SecurityGroups:
+            - !Ref SecurityGroupId
+          AssignPublicIp: ENABLED
+      LoadBalancers:
+        - TargetGroupArn: !Ref TargetGroup
+          ContainerName: airflow-webserver
+          ContainerPort: 8080
+
+Outputs:
+  AirflowALBDNS:
+    Description: "URL pública del ALB de Airflow"
+    Value: !GetAtt LoadBalancer.DNSName
