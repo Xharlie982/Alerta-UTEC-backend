@@ -21,6 +21,7 @@ JWT_SECRET="mi-secreto-para-la-hackathon-utec-2025-es-increible"
 AIRFLOW_API_URL="http://3.236.149.2:8081/api/v1"
 WS_API_URL="wss://ufs7epfg85.execute-api.us-east-1.amazonaws.com/dev"
 WS_API_REGION="us-east-1"
+AIRFLOW_AUTH_TOKEN="YWlyZmxvdzphaXJmbG93"
 
 # --- 2. SCRIPT DE DESPLIEGUE ---
 
@@ -59,7 +60,8 @@ aws cloudformation deploy \
     JwtSecret="${JWT_SECRET}" \
     AirflowApiUrl="${AIRFLOW_API_URL}" \
     WsApiUrl="${WS_API_URL}" \
-    WsApiRegion="${WS_API_REGION}"
+    WsApiRegion="${WS_API_REGION}" \
+    AirflowAuthToken="${AIRFLOW_AUTH_TOKEN}"
 
 echo "[7/7] ¡Éxito! Obteniendo la URL de tu nuevo servicio..."
 aws cloudformation describe-stacks \

@@ -23,6 +23,9 @@ Parameters:
     NoEcho: true
   AirflowApiUrl:
     Type: String
+  AirflowAuthToken:
+    Type: String
+    NoEcho: true
   WsApiUrl:
     Type: String
   WsApiRegion:
@@ -125,6 +128,8 @@ Resources:
               Value: !Ref WsApiUrl
             - Name: WS_API_REGION
               Value: !Ref WsApiRegion
+            - Name: AIRFLOW_AUTH_TOKEN
+              Value: !Ref AirflowAuthToken
 
   # 7. El Servicio ECS (Mantiene la tarea corriendo)
   Service:
