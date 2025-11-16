@@ -1,99 +1,26 @@
 # serverless-fargate.yml
-
 org: carlosalith
 service: alerta-utec-fargate-backend
 
 plugins:
   - serverless-fargate-plugin
 
-custom:
-  # Configuración del plugin de Fargate
-  fargate:
-    # 1. Definición del Cluster ECS
-    cluster: alerta-utec-cluster
-    
-    # 2. Definición del Application Load Balancer (ALB)
-    alb:
-      # Nombre para el ALB
-      name: alerta-utec-alb
-      # Los Security Groups que debe usar el ALB
-      # Usamos el 'default' que encontramos: sg-0a1b5b40b49d1e6e0
-      securityGroups:
-        - sg-0a1b5b40b49d1e6e0
-      # Las Subredes PÚBLICAS donde debe vivir el ALB
-      subnets:
-        - subnet-07faeabfbd92cf773
-        - subnet-043b0ddb38c8c44b4
-        - subnet-0fb755b639e662042
-        - subnet-0c52b65256305a50b
-        - subnet-09ee1cd3fefabaa26
-        - subnet-09cd3086124d184b4
-
 provider:
   name: aws
-  # El plugin de Fargate maneja el runtime, pero definimos la región
   region: us-east-1
+  # Mantén provider simple: no pongas aquí 'iam.taskRole' ni campos propios del plugin.
 
-  # Roles de IAM que usará Fargate
-  # ESTO ES CLAVE para que Fargate tenga permisos
-  iam:
-    # Rol que usa la Tarea (para hablar con DynamoDB, API Gateway, etc.)
-    taskRole: arn:aws:iam::263323339622:role/LabRole
-    # Rol que usa ECS (para jalar la imagen de ECR)
-    executionRole: arn:aws:iam::263323339622:role/LabRole
+custom:
+  # Todas las opciones específicas del plugin Fargate van dentro de custom.fargate
+  fargate:
+    # Cluster ECS
+    cluster: alerta-utec-cluster
 
-  # Repositorio ECR donde se guardará tu imagen de Docker
-  ecr:
-    images:
-      # Nombre de la imagen de Docker
-      alerta-utec-backend:
-        # Ruta al Dockerfile
-        path: .
-        dockerfile: Dockerfile
-
-# Definición de las Tareas y Servicios de Fargate
-fargate:
-  # Nombre del servicio
-  service: alerta-utec-backend-service
-  
-  # Definición de la Tarea (Task Definition)
-  task:
-    # Cuánta CPU y Memoria (512 = 0.5 vCPU, 1024 = 1GB RAM)
-    cpu: 512
-    memory: 1024
-    
-    # El nombre de la imagen de Docker a usar (de la sección 'ecr' de arriba)
-    image: alerta-utec-backend
-    
-    # El puerto que tu app Node.js expone (definido en tu Dockerfile)
-    port: 8080
-    
-    # --- VARIABLES DE ENTORNO (Inyectadas desde aquí) ---
-    # ¡Tu backend leerá esto!
-    environment:
-      PORT: 8080
-      NODE_ENV: production
-      AWS_REGION: us-east-1
-      
-      # ¡¡IMPORTANTE!! Reemplaza esto con tu secreto real del .env
-      JWT_SECRET: "mi-secreto-para-la-hackathon-utec-2025-es-increible" 
-      
-      # Nombres de Tablas DynamoDB
-      DDB_TABLE_USUARIOS: AlertaUTEC_Usuarios
-      DDB_TABLE_INCIDENTES: AlertaUTEC_Incidentes
-      DDB_TABLE_HISTORIAL: AlertaUTEC_Historial
-      DDB_TABLE_CONEXIONES_WS: AlertaUTEC_ConexionesWS
-      
-      # URLs de los otros servicios (¡Reales!)
-      WS_API_GATEWAY_URL: wss://ufs7epfg85.execute-api.us-east-1.amazonaws.com/dev
-      WS_API_REGION: us-east-1
-      AIRFLOW_API_URL: http://3.236.149.2:8081/api/v1
-
-    # Configuración de Red para el Servicio
-    vpc:
-      # El VPC ID que encontramos
-      id: vpc-01ca41df3938a43d0
-      # Las Subredes PÚBLICAS
+    # ALB (Application Load Balancer)
+    alb:
+      name: alerta-utec-alb
+      securityGroups:
+        - sg-0a1b5b40b49d1e6e0
       subnets:
         - subnet-07faeabfbd92cf773
         - subnet-043b0ddb38c8c44b4
@@ -101,15 +28,57 @@ fargate:
         - subnet-0c52b65256305a50b
         - subnet-09ee1cd3fefabaa26
         - subnet-09cd3086124d184b4
-      # El Security Group que debe usar
-      securityGroups:
-        - sg-0a1b5b40b49d1e6e0
 
-    # Conectar el servicio al ALB
-    alb:
-      # El puerto 80 del ALB...
-      listener: 80
-      # ...se conecta al puerto 8080 de tu contenedor
-      containerPort: 8080
-      # Regla de ruteo: todo el tráfico (/*) va a tu contenedor
-      path: /*
+    # Roles IAM (para la tarea y la ejecución) que ya creaste en la cuenta
+    iam:
+      taskRole: arn:aws:iam::263323339622:role/LabRole
+      executionRole: arn:aws:iam::263323339622:role/LabRole
+
+    # ECR (image build/push) config. 'dockerfile' aquí es manejado por el plugin.
+    ecr:
+      images:
+        alerta-utec-backend:
+          path: .
+          dockerfile: Dockerfile
+
+    # Servicio y TaskDefinition (tu app)
+    service: alerta-utec-backend-service
+
+    task:
+      cpu: 512
+      memory: 1024
+      image: alerta-utec-backend
+      port: 8080
+
+      environment:
+        PORT: 8080
+        NODE_ENV: production
+        AWS_REGION: us-east-1
+        JWT_SECRET: "mi-secreto-para-la-hackathon-utec-2025-es-increible"
+        DDB_TABLE_USUARIOS: AlertaUTEC_Usuarios
+        DDB_TABLE_INCIDENTES: AlertaUTEC_Incidentes
+        DDB_TABLE_HISTORIAL: AlertaUTEC_Historial
+        DDB_TABLE_CONEXIONES_WS: AlertaUTEC_ConexionesWS
+        WS_API_GATEWAY_URL: wss://ufs7epfg85.execute-api.us-east-1.amazonaws.com/dev
+        WS_API_REGION: us-east-1
+        AIRFLOW_API_URL: http://3.236.149.2:8081/api/v1
+
+      vpc:
+        id: vpc-01ca41df3938a43d0
+        subnets:
+          - subnet-07faeabfbd92cf773
+          - subnet-043b0ddb38c8c44b4
+          - subnet-0fb755b639e662042
+          - subnet-0c52b65256305a50b
+          - subnet-09ee1cd3fefabaa26
+          - subnet-09cd3086124d184b4
+        securityGroups:
+          - sg-0a1b5b40b49d1e6e0
+
+      alb:
+        listener: 80
+        containerPort: 8080
+        path: /*
+
+# No definas 'resources' ni 'fargate' en la raíz que sean específicos del plugin.
+# El plugin leerá custom.fargate y generará los recursos necesarios en CloudFormation.
