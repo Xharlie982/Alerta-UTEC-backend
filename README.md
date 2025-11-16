@@ -74,7 +74,7 @@ Registra un nuevo usuario.
       "password": "password123",
       "nombre": "Trabajador Demo",
       "rol": "trabajador",
-      "registrationCode": "UTEC-STAFF-2025"
+      "registrationCode": "EL_CODIGO_SECRETO_DE_TRABAJADOR"
     }
     ```
 * **Rol `supervisor` (Autoridad):** Requiere código de registro.
@@ -84,7 +84,7 @@ Registra un nuevo usuario.
       "password": "password123",
       "nombre": "Supervisor Demo",
       "rol": "supervisor",
-      "registrationCode": "UTEC-ADMIN-SUPER-SECRET"
+      "registrationCode": "EL_CODIGO_SECRETO_DE_SUPERVISOR"
     }
     ```
 * **Respuesta Exitosa (201):**

@@ -14,4 +14,7 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
+# Scripts locales de despliegue (contienen parámetros sensibles)
+deploy_fargate.sh
+
 
