@@ -1,0 +1,52 @@
+# services-websocket/serverless.yml
+
+org: carlosalith
+service: alerta-utec-websocket
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: ${env:AWS_REGION, 'us-east-1'}
+
+  # Usamos el mismo rol de AWS Academy
+  iam:
+    role: arn:aws:iam::263323339622:role/LabRole
+
+  # Definimos la API Gateway WebSocket
+  websocketsApiName: alerta-utec-websocket-api
+  websocketsApiRouteSelectionExpression: $request.body.action
+
+  # Damos permisos a nuestras Lambdas para que puedan
+  # escribir y borrar en la tabla de conexiones
+  environment:
+    DDB_TABLE_CONEXIONES_WS: ${env:DDB_TABLE_CONEXIONES_WS}
+    JWT_SECRET: ${env:JWT_SECRET}
+
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "dynamodb:PutItem"
+        - "dynamodb:DeleteItem"
+      Resource: "arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/${env:DDB_TABLE_CONEXIONES_WS}"
+
+# 3. Definición de las 3 Lambdas
+functions:
+  connectHandler:
+    handler: handler-connect.handler
+    events:
+      - websocket:
+          route: $connect
+
+  disconnectHandler:
+    handler: handler-disconnect.handler
+    events:
+      - websocket:
+          route: $disconnect
+
+  defaultHandler:
+    handler: handler-default.handler
+    events:
+      - websocket:
+          route: $default
+
+
