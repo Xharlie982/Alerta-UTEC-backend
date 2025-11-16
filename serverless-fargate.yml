@@ -1,3 +1,6 @@
+# serverless-fargate.yml
+
+org: carlosalith
 service: alerta-utec-fargate-backend
 
 plugins:
