@@ -8,9 +8,6 @@ provider:
   runtime: nodejs20.x
   region: ${env:AWS_REGION, 'us-east-1'}
 
-  useDotenv: true
-  dotenvPath: ../.env
-
   # Usamos el mismo rol de AWS Academy
   iam:
     role: arn:aws:iam::263323339622:role/LabRole
