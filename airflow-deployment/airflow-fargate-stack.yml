@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Despliegue de Airflow en Fargate (Demo Multi-contenedor) - V4 Definitiva'
+Description: 'Despliegue de Airflow en Fargate (Con inicialización de DB y Workers)'
 
 Parameters:
   VpcId:
@@ -13,19 +13,17 @@ Parameters:
   ExecutionRoleArn:
     Type: String
   ImageUri:
-    Type: String # URL de la imagen en ECR
+    Type: String
   S3DagsPath:
-    Type: String # ej: s3://piglets-airflow-dags-utec-2025/dags
+    Type: String
 
 Resources:
-  # 1. Log Group para CloudWatch
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: /ecs/alerta-utec-airflow
       RetentionInDays: 7
 
-  # 2. El Application Load Balancer (ALB)
   LoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
@@ -35,7 +33,6 @@ Resources:
         - !Ref SecurityGroupId
       Scheme: internet-facing
 
-  # 3. El Target Group (con Health Check paciente)
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -44,16 +41,14 @@ Resources:
       Port: 8080
       Protocol: HTTP
       TargetType: ip
-      HealthCheckPath: /health # Healthcheck nativo de Airflow
+      HealthCheckPath: /health
       Matcher:
         HttpCode: '200'
-      # --- AJUSTES DE PACIENCIA ---
       HealthCheckIntervalSeconds: 60
       HealthCheckTimeoutSeconds: 30
       HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 10 # 10 minutos de gracia
+      UnhealthyThresholdCount: 10
 
-  # 4. El Listener del ALB (en el puerto 8081)
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -64,13 +59,13 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref TargetGroup
 
-  # 5. La Definición de Tarea (con 4GB de RAM y ORDEN DE ARRANQUE)
+  # --- Definición de Tarea con 6 Contenedores, 8GB RAM y Init ---
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: alerta-utec-airflow-task
-      Cpu: 1024       # 1 vCPU
-      Memory: 4096    # 4 GB
+      Cpu: 2048       # 2 vCPU
+      Memory: 8192    # 8 GB RAM
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -78,7 +73,7 @@ Resources:
       TaskRoleArn: !Ref TaskRoleArn
       
       ContainerDefinitions:
-        # --- Contenedor 1: Postgres (Debe estar saludable PRIMERO) ---
+        # --- Contenedor 1: Postgres ---
         - Name: postgres
           Image: postgres:13
           PortMappings:
@@ -96,15 +91,14 @@ Resources:
               Value: airflow
             - Name: POSTGRES_DB
               Value: airflow
-          # --- CORRECCIÓN CLAVE: HealthCheck con StartPeriod ---
           HealthCheck:
-            Command: [ "CMD-SHELL", "pg_isready -U airflow -d airflow || exit 1" ]
-            Interval: 30         # Chequear cada 30s
-            Timeout: 10          # Esperar 10s
-            StartPeriod: 60      # ¡Ventana de gracia de 60s!
-            Retries: 10          # 10 reintentos
+            Command: [ "CMD-SHELL", "pg_isready -U airflow || exit 1" ]
+            Interval: 15
+            Timeout: 5
+            StartPeriod: 120   # 2 minutos de gracia
+            Retries: 5
 
-        # --- Contenedor 2: Redis (Debe estar saludable PRIMERO) ---
+        # --- Contenedor 2: Redis ---
         - Name: redis
           Image: redis:latest
           PortMappings:
@@ -115,32 +109,72 @@ Resources:
               awslogs-group: !Ref LogGroup
               awslogs-region: !Ref 'AWS::Region'
               awslogs-stream-prefix: redis
-          # --- CORRECCIÓN CLAVE: HealthCheck con StartPeriod ---
           HealthCheck:
             Command: [ "CMD-SHELL", "redis-cli ping | grep PONG || exit 1" ]
-            Interval: 15         # Chequear cada 15s
-            Timeout: 5           # Esperar 5s
-            StartPeriod: 20      # ¡Ventana de gracia de 20s!
-            Retries: 6           # 6 reintentos
+            Interval: 10
+            Timeout: 3
+            StartPeriod: 30
+            Retries: 3
         
-        # --- Contenedor 3: Airflow Webserver (Espera a Postgres y Redis) ---
+        # --- Contenedor 3: Airflow Init (NUEVO - Inicializa la BD) ---
+        - Name: airflow-init
+          Image: !Ref ImageUri
+          Essential: false   # No es esencial, solo corre una vez y sale
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: airflow-init
+          DependsOn:
+            - ContainerName: postgres
+              Condition: HEALTHY
+            - ContainerName: redis
+              Condition: HEALTHY
+          Environment:
+            - Name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              Value: postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
+            - Name: AIRFLOW__CORE__EXECUTOR
+              Value: CeleryExecutor
+            - Name: AIRFLOW__CELERY__BROKER_URL
+              Value: redis://localhost:6379/0
+            - Name: AIRFLOW__CELERY__RESULT_BACKEND
+              Value: db+postgresql://airflow:airflow@localhost:5432/airflow
+            - Name: AIRFLOW__CORE__DAGS_FOLDER
+              Value: !Ref S3DagsPath
+            - Name: AIRFLOW__CORE__LOAD_EXAMPLES
+              Value: 'False'
+          # Comando que inicializa y crea el usuario admin
+          Command:
+            - bash
+            - -c
+            - |
+              airflow db migrate
+              airflow users create \
+                --username airflow \
+                --password airflow \
+                --firstname Admin \
+                --lastname User \
+                --role Admin \
+                --email admin@example.com || true
+              echo "Inicialización completa"
+
+        # --- Contenedor 4: Airflow Webserver ---
         - Name: airflow-webserver
           Image: !Ref ImageUri
           Essential: true
           PortMappings:
-            - ContainerPort: 8080 # Puerto expuesto al ALB
+            - ContainerPort: 8080
           LogConfiguration:
             LogDriver: awslogs
             Options:
               awslogs-group: !Ref LogGroup
               awslogs-region: !Ref 'AWS::Region'
               awslogs-stream-prefix: airflow-webserver
-          # --- Dependencia de arranque ---
+          # Espera a que el contenedor 'init' termine con éxito
           DependsOn:
-            - ContainerName: postgres
-              Condition: HEALTHY
-            - ContainerName: redis
-              Condition: HEALTHY
+            - ContainerName: airflow-init
+              Condition: SUCCESS
           Environment:
             - Name: AIRFLOW__CORE__EXECUTOR
               Value: CeleryExecutor
@@ -148,7 +182,6 @@ Resources:
               Value: postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
             - Name: AIRFLOW__CELERY__BROKER_URL
               Value: redis://localhost:6379/0
-            # --- CORRECCIÓN CLAVE: Formato de URL de Celery ---
             - Name: AIRFLOW__CELERY__RESULT_BACKEND
               Value: db+postgresql://airflow:airflow@localhost:5432/airflow
             - Name: AIRFLOW__CORE__DAGS_FOLDER
@@ -157,7 +190,7 @@ Resources:
               Value: 'False'
           Command: [ "webserver" ]
 
-        # --- Contenedor 4: Airflow Scheduler (Espera a Postgres y Redis) ---
+        # --- Contenedor 5: Airflow Scheduler ---
         - Name: airflow-scheduler
           Image: !Ref ImageUri
           Essential: true
@@ -167,12 +200,9 @@ Resources:
               awslogs-group: !Ref LogGroup
               awslogs-region: !Ref 'AWS::Region'
               awslogs-stream-prefix: airflow-scheduler
-          # --- Dependencia de arranque ---
           DependsOn:
-            - ContainerName: postgres
-              Condition: HEALTHY
-            - ContainerName: redis
-              Condition: HEALTHY
+            - ContainerName: airflow-init
+              Condition: SUCCESS
           Environment:
             - Name: AIRFLOW__CORE__EXECUTOR
               Value: CeleryExecutor
@@ -180,7 +210,6 @@ Resources:
               Value: postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
             - Name: AIRFLOW__CELERY__BROKER_URL
               Value: redis://localhost:6379/0
-            # --- CORRECCIÓN CLAVE: Formato de URL de Celery ---
             - Name: AIRFLOW__CELERY__RESULT_BACKEND
               Value: db+postgresql://airflow:airflow@localhost:5432/airflow
             - Name: AIRFLOW__CORE__DAGS_FOLDER
@@ -189,13 +218,40 @@ Resources:
               Value: 'False'
           Command: [ "scheduler" ]
 
-  # 6. El Servicio ECS (Ejecuta la Tarea y la conecta al ALB)
+        # --- Contenedor 6: Celery Worker (NUEVO - Ejecuta las tareas) ---
+        - Name: airflow-worker
+          Image: !Ref ImageUri
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: airflow-worker
+          DependsOn:
+            - ContainerName: airflow-init
+              Condition: SUCCESS
+          Environment:
+            - Name: AIRFLOW__CORE__EXECUTOR
+              Value: CeleryExecutor
+            - Name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              Value: postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
+            - Name: AIRFLOW__CELERY__BROKER_URL
+              Value: redis://localhost:6379/0
+            - Name: AIRFLOW__CELERY__RESULT_BACKEND
+              Value: db+postgresql://airflow:airflow@localhost:5432/airflow
+            - Name: AIRFLOW__CORE__DAGS_FOLDER
+              Value: !Ref S3DagsPath
+            - Name: AIRFLOW__CORE__LOAD_EXAMPLES
+              Value: 'False'
+          Command: [ "celery", "worker" ]
+
   Service:
     Type: AWS::ECS::Service
     DependsOn: Listener
     Properties:
       ServiceName: alerta-utec-airflow-service
-      Cluster: alerta-utec-cluster # Usamos el MISMO cluster que tu backend
+      Cluster: alerta-utec-cluster
       DesiredCount: 1
       LaunchType: FARGATE
       PlatformVersion: LATEST
@@ -210,8 +266,10 @@ Resources:
         - TargetGroupArn: !Ref TargetGroup
           ContainerName: airflow-webserver
           ContainerPort: 8080
+      # Período de gracia de 10 minutos para que todo se estabilice
+      HealthCheckGracePeriodSeconds: 600
 
 Outputs:
   AirflowALBDNS:
-    Description: "URL pública del ALB de Airflow"
-    Value: !GetAtt LoadBalancer.DNSName
+    Description: "URL pública del ALB de Airflow (http://DNS:8081)"
+    Value: !Sub "http://${LoadBalancer.DNSName}:8081"
