@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Despliegue de Airflow en Fargate (Con init, worker y DAGs locales) - V5 FINAL'
+Description: 'Despliegue de Airflow en Fargate (Con Basic Auth y DAGs locales) - V6 FINAL'
 
 Parameters:
   VpcId:
@@ -15,7 +15,7 @@ Parameters:
   ImageUri:
     Type: String
   S3DagsPath:
-    Type: String # Se mantiene por compatibilidad, pero NO SE USA en la config de Airflow
+    Type: String # Se mantiene por compatibilidad, pero NO SE USA.
 
 Resources:
   LogGroup:
@@ -65,7 +65,7 @@ Resources:
     Properties:
       Family: alerta-utec-airflow-task
       Cpu: 2048       # 2 vCPU
-      Memory: 8192    # 8 GB RAM (Necesario para 6 contenedores)
+      Memory: 8192    # 8 GB RAM
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -95,7 +95,7 @@ Resources:
             Command: [ "CMD-SHELL", "pg_isready -U airflow || exit 1" ]
             Interval: 15
             Timeout: 5
-            StartPeriod: 120   # 2 min de gracia para arrancar
+            StartPeriod: 120
             Retries: 5
 
         # --- 2. Redis ---
@@ -116,10 +116,10 @@ Resources:
             StartPeriod: 30
             Retries: 3
         
-        # --- 3. Airflow Init (Inicializa DB y Usuario) ---
+        # --- 3. Airflow Init ---
         - Name: airflow-init
           Image: !Ref ImageUri
-          Essential: false   # Corre una vez y muere (exit 0)
+          Essential: false
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -140,11 +140,11 @@ Resources:
               Value: redis://localhost:6379/0
             - Name: AIRFLOW__CELERY__RESULT_BACKEND
               Value: db+postgresql://airflow:airflow@localhost:5432/airflow
-            # --- CORRECCIÓN: Usamos ruta local ---
             - Name: AIRFLOW__CORE__DAGS_FOLDER
               Value: /opt/airflow/dags
             - Name: AIRFLOW__CORE__LOAD_EXAMPLES
               Value: 'False'
+            # No necesita AUTH porque no expone API
           Command:
             - bash
             - -c
@@ -183,11 +183,15 @@ Resources:
               Value: redis://localhost:6379/0
             - Name: AIRFLOW__CELERY__RESULT_BACKEND
               Value: db+postgresql://airflow:airflow@localhost:5432/airflow
-            # --- CORRECCIÓN: Usamos ruta local ---
             - Name: AIRFLOW__CORE__DAGS_FOLDER
               Value: /opt/airflow/dags
             - Name: AIRFLOW__CORE__LOAD_EXAMPLES
               Value: 'False'
+            # 🔧 CRÍTICO: Habilitar Basic Auth para la API
+            - Name: AIRFLOW__API__AUTH_BACKENDS
+              Value: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
+            - Name: AIRFLOW__WEBSERVER__WEB_SERVER_WORKER_TIMEOUT
+              Value: '300'
           Command: [ "webserver" ]
 
         # --- 5. Airflow Scheduler ---
@@ -212,11 +216,13 @@ Resources:
               Value: redis://localhost:6379/0
             - Name: AIRFLOW__CELERY__RESULT_BACKEND
               Value: db+postgresql://airflow:airflow@localhost:5432/airflow
-            # --- CORRECCIÓN: Usamos ruta local ---
             - Name: AIRFLOW__CORE__DAGS_FOLDER
               Value: /opt/airflow/dags
             - Name: AIRFLOW__CORE__LOAD_EXAMPLES
               Value: 'False'
+            # 🔧 Basic Auth
+            - Name: AIRFLOW__API__AUTH_BACKENDS
+              Value: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
           Command: [ "scheduler" ]
 
         # --- 6. Airflow Worker ---
@@ -241,11 +247,13 @@ Resources:
               Value: redis://localhost:6379/0
             - Name: AIRFLOW__CELERY__RESULT_BACKEND
               Value: db+postgresql://airflow:airflow@localhost:5432/airflow
-            # --- CORRECCIÓN: Usamos ruta local ---
             - Name: AIRFLOW__CORE__DAGS_FOLDER
               Value: /opt/airflow/dags
             - Name: AIRFLOW__CORE__LOAD_EXAMPLES
               Value: 'False'
+            # 🔧 Basic Auth
+            - Name: AIRFLOW__API__AUTH_BACKENDS
+              Value: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
           Command: [ "celery", "worker" ]
 
   Service:
@@ -272,5 +280,5 @@ Resources:
 
 Outputs:
   AirflowALBDNS:
-    Description: "URL pública del ALB de Airflow (http://DNS:8081)"
+    Description: "URL pública del ALB de Airflow"
     Value: !Sub "http://${LoadBalancer.DNSName}:8081"
