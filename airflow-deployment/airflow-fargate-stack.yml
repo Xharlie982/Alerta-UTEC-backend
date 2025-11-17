@@ -65,7 +65,7 @@ Resources:
     Properties:
       Family: alerta-utec-airflow-task
       Cpu: 1024       # 1 vCPU
-      Memory: 3072    # 3 GB (Airflow es pesado)
+      Memory: 4096    # 3 GB (Airflow es pesado)
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
