@@ -15,7 +15,7 @@ Parameters:
   ImageUri:
     Type: String # URL de la imagen en ECR
   S3DagsPath:
-    Type: String # ej: s3://mi-bucket/dags
+    Type: String # ej: s3://piglets-airflow-dags-utec-2025/dags
 
 Resources:
   # 1. Log Group para CloudWatch
@@ -35,7 +35,7 @@ Resources:
         - !Ref SecurityGroupId
       Scheme: internet-facing
 
-  # 3. El Target Group (puerto 8080 del webserver)
+  # 3. El Target Group (con Health Check paciente)
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -47,6 +47,11 @@ Resources:
       HealthCheckPath: /health # Healthcheck nativo de Airflow
       Matcher:
         HttpCode: '200'
+      # --- AJUSTES DE PACIENCIA (LA CORRECCIÓN) ---
+      HealthCheckIntervalSeconds: 60  # Chequear cada 60 seg
+      HealthCheckTimeoutSeconds: 30   # Esperar 30 seg por respuesta
+      HealthyThresholdCount: 2        # Solo 2 chequeos OK para estar "sano"
+      UnhealthyThresholdCount: 10     # Permitir 10 fallos seguidos (10 min)
 
   # 4. El Listener del ALB (en el puerto 8081)
   Listener:
@@ -59,13 +64,13 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref TargetGroup
 
-  # 5. La Definición de Tarea (El "docker-compose" de Fargate)
+  # 5. La Definición de Tarea (con 4GB de RAM)
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: alerta-utec-airflow-task
       Cpu: 1024       # 1 vCPU
-      Memory: 4096    # 3 GB (Airflow es pesado)
+      Memory: 4096    # 4 GB (LA CORRECCIÓN)
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -125,7 +130,7 @@ Resources:
             - Name: AIRFLOW__CELERY__BROKER_URL
               Value: redis://localhost:6379/0
             - Name: AIRFLOW__CELERY__RESULT_BACKEND
-              Value: db+postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
+              Value: db+postgresql+pslgresql+psycopg2://airflow:airflow@localhost:5432/airflow
             - Name: AIRFLOW__CORE__DAGS_FOLDER
               Value: !Ref S3DagsPath
             - Name: AIRFLOW__CORE__LOAD_EXAMPLES
