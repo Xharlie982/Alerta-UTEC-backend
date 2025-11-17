@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Despliegue de Airflow en Fargate (Demo Multi-contenedor)'
+Description: 'Despliegue de Airflow en Fargate (Demo Multi-contenedor) - V4 Definitiva'
 
 Parameters:
   VpcId:
@@ -47,39 +47,38 @@ Resources:
       HealthCheckPath: /health # Healthcheck nativo de Airflow
       Matcher:
         HttpCode: '200'
-      # --- AJUSTES DE PACIENCIA (LA CORRECCIÓN) ---
-      HealthCheckIntervalSeconds: 60  # Chequear cada 60 seg
-      HealthCheckTimeoutSeconds: 30   # Esperar 30 seg por respuesta
-      HealthyThresholdCount: 2        # Solo 2 chequeos OK para estar "sano"
-      UnhealthyThresholdCount: 10     # Permitir 10 fallos seguidos (10 min)
+      # --- AJUSTES DE PACIENCIA ---
+      HealthCheckIntervalSeconds: 60
+      HealthCheckTimeoutSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 10 # 10 minutos de gracia
 
   # 4. El Listener del ALB (en el puerto 8081)
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       LoadBalancerArn: !Ref LoadBalancer
-      Port: 8081 # Usamos 8081 para no chocar con el 8080 del backend
+      Port: 8081
       Protocol: HTTP
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref TargetGroup
 
-  # 5. La Definición de Tarea (con 4GB de RAM)
+  # 5. La Definición de Tarea (con 4GB de RAM y ORDEN DE ARRANQUE)
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: alerta-utec-airflow-task
       Cpu: 1024       # 1 vCPU
-      Memory: 4096    # 4 GB (LA CORRECCIÓN)
+      Memory: 4096    # 4 GB
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
       ExecutionRoleArn: !Ref ExecutionRoleArn
       TaskRoleArn: !Ref TaskRoleArn
       
-      # --- DEFINICIÓN DE LOS 4 CONTENEDORES ---
       ContainerDefinitions:
-        # Contenedor 1: Postgres (Base de datos)
+        # --- Contenedor 1: Postgres (Debe estar saludable PRIMERO) ---
         - Name: postgres
           Image: postgres:13
           PortMappings:
@@ -97,8 +96,15 @@ Resources:
               Value: airflow
             - Name: POSTGRES_DB
               Value: airflow
+          # --- CORRECCIÓN CLAVE: HealthCheck con StartPeriod ---
+          HealthCheck:
+            Command: [ "CMD-SHELL", "pg_isready -U airflow -d airflow || exit 1" ]
+            Interval: 30         # Chequear cada 30s
+            Timeout: 10          # Esperar 10s
+            StartPeriod: 60      # ¡Ventana de gracia de 60s!
+            Retries: 10          # 10 reintentos
 
-        # Contenedor 2: Redis (Cola de mensajes)
+        # --- Contenedor 2: Redis (Debe estar saludable PRIMERO) ---
         - Name: redis
           Image: redis:latest
           PortMappings:
@@ -109,8 +115,15 @@ Resources:
               awslogs-group: !Ref LogGroup
               awslogs-region: !Ref 'AWS::Region'
               awslogs-stream-prefix: redis
+          # --- CORRECCIÓN CLAVE: HealthCheck con StartPeriod ---
+          HealthCheck:
+            Command: [ "CMD-SHELL", "redis-cli ping | grep PONG || exit 1" ]
+            Interval: 15         # Chequear cada 15s
+            Timeout: 5           # Esperar 5s
+            StartPeriod: 20      # ¡Ventana de gracia de 20s!
+            Retries: 6           # 6 reintentos
         
-        # Contenedor 3: Airflow Webserver (UI y API)
+        # --- Contenedor 3: Airflow Webserver (Espera a Postgres y Redis) ---
         - Name: airflow-webserver
           Image: !Ref ImageUri
           Essential: true
@@ -122,6 +135,12 @@ Resources:
               awslogs-group: !Ref LogGroup
               awslogs-region: !Ref 'AWS::Region'
               awslogs-stream-prefix: airflow-webserver
+          # --- Dependencia de arranque ---
+          DependsOn:
+            - ContainerName: postgres
+              Condition: HEALTHY
+            - ContainerName: redis
+              Condition: HEALTHY
           Environment:
             - Name: AIRFLOW__CORE__EXECUTOR
               Value: CeleryExecutor
@@ -129,15 +148,16 @@ Resources:
               Value: postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
             - Name: AIRFLOW__CELERY__BROKER_URL
               Value: redis://localhost:6379/0
+            # --- CORRECCIÓN CLAVE: Formato de URL de Celery ---
             - Name: AIRFLOW__CELERY__RESULT_BACKEND
-              Value: db+postgresql+pslgresql+psycopg2://airflow:airflow@localhost:5432/airflow
+              Value: db+postgresql://airflow:airflow@localhost:5432/airflow
             - Name: AIRFLOW__CORE__DAGS_FOLDER
               Value: !Ref S3DagsPath
             - Name: AIRFLOW__CORE__LOAD_EXAMPLES
               Value: 'False'
           Command: [ "webserver" ]
 
-        # Contenedor 4: Airflow Scheduler (El cerebro)
+        # --- Contenedor 4: Airflow Scheduler (Espera a Postgres y Redis) ---
         - Name: airflow-scheduler
           Image: !Ref ImageUri
           Essential: true
@@ -147,6 +167,12 @@ Resources:
               awslogs-group: !Ref LogGroup
               awslogs-region: !Ref 'AWS::Region'
               awslogs-stream-prefix: airflow-scheduler
+          # --- Dependencia de arranque ---
+          DependsOn:
+            - ContainerName: postgres
+              Condition: HEALTHY
+            - ContainerName: redis
+              Condition: HEALTHY
           Environment:
             - Name: AIRFLOW__CORE__EXECUTOR
               Value: CeleryExecutor
@@ -154,8 +180,9 @@ Resources:
               Value: postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
             - Name: AIRFLOW__CELERY__BROKER_URL
               Value: redis://localhost:6379/0
+            # --- CORRECCIÓN CLAVE: Formato de URL de Celery ---
             - Name: AIRFLOW__CELERY__RESULT_BACKEND
-              Value: db+postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
+              Value: db+postgresql://airflow:airflow@localhost:5432/airflow
             - Name: AIRFLOW__CORE__DAGS_FOLDER
               Value: !Ref S3DagsPath
             - Name: AIRFLOW__CORE__LOAD_EXAMPLES
