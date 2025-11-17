@@ -23,6 +23,27 @@ La arquitectura es una solución híbrida que cumple con los requisitos de escal
 | WebSocket | WSS | `wss://ufs7epfg85.execute-api.us-east-1.amazonaws.com/dev` | Usado por el Frontend. |
 | Airflow UI | HTTP | `http://3.236.149.2:8081` | Usuario/Contraseña: `airflow` / `airflow`. |
 
+## 🔗 Endpoints de API
+
+URL Base de la API (Fargate): `http://alerta-utec-alb-1269448375.us-east-1.elb.amazonaws.com`
+
+### Autenticación y Registro (Rutas Públicas)
+
+| Endpoint | Método | Rol | Requisito | Cuerpo de Ejemplo |
+| :--- | :--- | :--- | :--- | :--- |
+| `/auth/login` | `POST` | Todos | N/A | `{"email": "usuario.demo@utec.edu.pe", "password": "password123"}` |
+| `/auth/register` | `POST` | Todos | `registrationCode` para roles `trabajador` o `supervisor` | `{"email": "nuevo@utec.edu.pe", "password": "pwd", "nombre": "Nombre", "rol": "usuario"}` |
+
+### Incidentes (Requiere `Authorization: Bearer <token>`)
+
+| Endpoint | Método | Rol | Cuerpo/Query de Ejemplo | Descripción |
+| :--- | :--- | :--- | :--- | :--- |
+| `/incidentes` | `POST` | `usuario` | `{"tipo": "infraestructura", "ubicacion": "B-3", "descripcion": "Falla de luz.", "urgencia": "media"}` | Crea un incidente. Dispara Airflow y notifica por WebSocket. |
+| `/incidentes` | `GET` | `usuario` `trabajador` `supervisor` | `/incidentes?estado=pendiente&tipo=seguridad` | Lista incidentes. Filtrado automático según el rol. |
+| `/incidentes/:id/asignar` | `PATCH` | `trabajador` | (vacío) | Asigna el incidente al trabajador que hace la petición. Estado: `en_atencion`. |
+| `/incidentes/:id/resolver` | `PATCH` | `trabajador` | (vacío) | Marca incidente como `resuelto`. Notifica al usuario reportante. |
+| `/incidentes/:id/historial` | `GET` | `usuario` `trabajador` `supervisor` | (vacío) | Trazabilidad completa del incidente. |
+
 ## 🔒 Lógica de roles y seguridad
 
 Registro seguro basado en códigos:
