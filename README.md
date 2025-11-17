@@ -1,126 +1,137 @@
-# AlertaUTEC Backend - Piglets
+# 🚨 AlertaUTEC Backend - Piglets
 
-Este repositorio contiene el backend de microservicios para la plataforma AlertaUTEC. La solución es elástica, segura y serverless, con gestión de incidentes en tiempo real.
+Este repositorio contiene el backend de microservicios para la plataforma **AlertaUTEC**. Es una solución integral para el reporte, monitoreo y orquestación de incidentes dentro del campus universitario, diseñada bajo una arquitectura **Cloud-Native, Elástica y 100% Serverless** en AWS.
 
-Estado del Proyecto: Completado y Desplegado.
+**Estado del Proyecto:** Completado y Desplegado 🚀
 
-## 🚀 Arquitectura Final (ECS Fargate + Serverless)
+---
+
+## 🏗️ Arquitectura Final (ECS Fargate + Serverless)
 
 La arquitectura es una solución híbrida que cumple con los requisitos de escalabilidad y utiliza los siguientes servicios de AWS:
 
 | Componente | Servicio AWS | Despliegue | Responsabilidad |
 | :--- | :--- | :--- | :--- |
-| Backend API | ECS Fargate | Contenedor Node.js | Autenticación, Lógica de Negocio, Disparo de WebSockets/Airflow. |
-| Base de Datos | DynamoDB | Serverless | Almacenamiento de Incidentes, Usuarios, Historial y ConexionesWS. |
-| Tiempo Real | API Gateway WS + Lambda | Serverless | Gestión y envío de notificaciones instantáneas (PostToConnection). |
-| Orquestación | Apache Airflow | Docker en EC2 | Clasificación automática y avisos a áreas responsables. |
+| **Backend API** | **ECS Fargate** | Contenedor Node.js | Autenticación, Lógica de Negocio, Disparo de WebSockets/Airflow. |
+| **Orquestación** | **ECS Fargate** | Cluster Airflow (6 Contenedores) | Clasificación automática de incidentes y gestión de flujos. |
+| **Base de Datos** | **DynamoDB** | Serverless | Almacenamiento de Incidentes, Usuarios, Historial y ConexionesWS. |
+| **Tiempo Real** | **API Gateway + Lambda** | Serverless | Gestión de WebSockets para notificaciones instantáneas en frontend. |
 
-## 🌎 URLs de acceso y pruebas
+---
+
+## 📜 Historia de la Migración: De EC2 a Fargate
+
+Uno de los mayores desafíos técnicos de este proyecto fue lograr una arquitectura verdaderamente serverless para el componente de orquestación (Airflow), dadas las restricciones de AWS Academy.
+
+1.  **Fase Inicial (IaaS):** Originalmente, desplegamos Airflow en una máquina virtual **EC2 (t2.large)**. El backend en Fargate se comunicaba con esta VM. Aunque funcional, esto presentaba un "punto único de fallo" y no era serverless.
+2.  **El Desafío:** Intentamos usar *Amazon MWAA* (Managed Airflow), pero estaba bloqueado en el laboratorio.
+3.  **La Solución (Containerización Total):** Diseñamos una arquitectura personalizada en **ECS Fargate**.
+    * Creamos una "Tarea Multi-Contenedor" compleja que ejecuta 6 servicios en paralelo: Postgres (metadata), Redis (cola), Airflow Webserver, Scheduler, Worker e Init.
+    * Asignamos 8GB de RAM y 2 vCPU para soportar la carga.
+    * Implementamos *Health Checks* personalizados para orquestar el orden de arranque (Postgres primero, luego Airflow).
+4.  **Resultado:** Eliminamos la dependencia de la EC2. Ahora todo el sistema escala y se gestiona como contenedores serverless.
+
+---
+
+## 🌎 URLs de Acceso y Pruebas
+
+Estas son las URLs activas del despliegue actual:
 
 | Servicio | Tipo | URL | Credenciales / Uso |
 | :--- | :--- | :--- | :--- |
-| Backend API (Fargate) | HTTP | `http://alerta-utec-alb-1269448375.us-east-1.elb.amazonaws.com` | Login, Reporte, Trazabilidad. |
-| WebSocket | WSS | `wss://ufs7epfg85.execute-api.us-east-1.amazonaws.com/dev` | Usado por el Frontend. |
-| Airflow UI | HTTP | `http://3.236.149.2:8081` | Usuario/Contraseña: `airflow` / `airflow`. |
+| **Backend API** | HTTP | `http://alerta-utec-alb-1269448375.us-east-1.elb.amazonaws.com` | Login, Reporte, Trazabilidad. |
+| **Airflow UI** | HTTP | `http://alerta-utec-airflow-alb-1231101991.us-east-1.elb.amazonaws.com:8081` | User: `airflow` / Pass: `airflow` |
+| **WebSocket** | WSS | `wss://ufs7epfg85.execute-api.us-east-1.amazonaws.com/dev` | Usado por el Frontend. |
+
+---
+
+## 📂 Guía de Infraestructura (IaC)
+
+Este proyecto utiliza **Infraestructura como Código** para desplegar todos sus componentes de manera automatizada.
+
+### Raíz del Proyecto
+* **`deploy_fargate.sh`**: Script maestro para desplegar el Backend. Construye la imagen Docker de Node.js, la sube a ECR y actualiza el stack de CloudFormation en Fargate.
+* **`fargate-stack.yml`**: Plantilla CloudFormation del Backend. Define la Tarea ECS, Servicio, ALB y variables de entorno.
+* **`serverless.yml`**: Define y despliega las tablas de **DynamoDB** (`Usuarios`, `Incidentes`, `Historial`, `ConexionesWS`).
+
+### Carpeta `airflow-deployment/`
+* **`deploy_airflow_fargate.sh`**: Script maestro para desplegar Airflow. Gestiona el bucket S3 (para artefactos), construye la imagen personalizada y despliega el stack en Fargate.
+* **`airflow-fargate-stack.yml`**: Define la Tarea Fargate de Airflow. Aquí está la lógica compleja de los 6 contenedores y los volúmenes efímeros.
+* **`airflow.Dockerfile`**: Imagen personalizada que inyecta el código del DAG y las librerías necesarias (`aws-providers`, `postgres`).
+* **`clasificar_incidente_dag.py`**: El código Python del flujo de trabajo que clasifica los incidentes recibidos.
+
+### Carpeta `services-websocket/`
+* **`serverless.yml`**: Configuración para desplegar la API WebSocket y sus funciones Lambda (`connect`, `disconnect`, `default`) que gestionan las conexiones en tiempo real.
+
+---
+
+## 🔐 Seguridad y Roles
+
+El sistema implementa registro seguro basado en códigos secretos y JWT.
+
+| Rol | Email (Ejemplo) | Password | Código Secreto (Para Registro) |
+| :--- | :--- | :--- | :--- |
+| **Usuario** | `estudiante.demo@utec.edu.pe` | `password123` | N/A |
+| **Trabajador** | `trabajador.demo@utec.edu.pe` | `password123` | `UTEC-STAFF-2025` |
+| **Supervisor** | `supervisor.demo@utec.edu.pe` | `password123` | `UTEC-ADMIN-SUPER-SECRET` |
+
+---
 
 ## 🔗 Endpoints de API
 
-URL Base de la API (Fargate): `http://alerta-utec-alb-1269448375.us-east-1.elb.amazonaws.com`
+**URL Base:** `http://alerta-utec-alb-1269448375.us-east-1.elb.amazonaws.com`
 
-### Autenticación y Registro (Rutas Públicas)
+### Autenticación (Público)
 
-| Endpoint | Método | Rol | Requisito | Cuerpo de Ejemplo |
-| :--- | :--- | :--- | :--- | :--- |
-| `/auth/login` | `POST` | Todos | N/A | `{"email": "usuario.demo@utec.edu.pe", "password": "password123"}` |
-| `/auth/register` | `POST` | Todos | `registrationCode` para roles `trabajador` o `supervisor` | `{"email": "nuevo@utec.edu.pe", "password": "pwd", "nombre": "Nombre", "rol": "usuario"}` |
+| Endpoint | Método | Descripción | Cuerpo Ejemplo |
+| :--- | :--- | :--- | :--- |
+| `/auth/login` | `POST` | Iniciar sesión | `{"email": "...", "password": "..."}` |
+| `/auth/register` | `POST` | Registrar usuario | `{"email": "...", "password": "...", "nombre": "...", "rol": "...", "registrationCode": "..."}` |
 
 ### Incidentes (Requiere `Authorization: Bearer <token>`)
 
-| Endpoint | Método | Rol | Cuerpo/Query de Ejemplo | Descripción |
-| :--- | :--- | :--- | :--- | :--- |
-| `/incidentes` | `POST` | `usuario` | `{"tipo": "infraestructura", "ubicacion": "B-3", "descripcion": "Falla de luz.", "urgencia": "media"}` | Crea un incidente. Dispara Airflow y notifica por WebSocket. |
-| `/incidentes` | `GET` | `usuario` `trabajador` `supervisor` | `/incidentes?estado=pendiente&tipo=seguridad` | Lista incidentes. Filtrado automático según el rol. |
-| `/incidentes/:id/asignar` | `PATCH` | `trabajador` | (vacío) | Asigna el incidente al trabajador que hace la petición. Estado: `en_atencion`. |
-| `/incidentes/:id/resolver` | `PATCH` | `trabajador` | (vacío) | Marca incidente como `resuelto`. Notifica al usuario reportante. |
-| `/incidentes/:id/historial` | `GET` | `usuario` `trabajador` `supervisor` | (vacío) | Trazabilidad completa del incidente. |
-
-## 🔒 Lógica de roles y seguridad
-
-Registro seguro basado en códigos:
-- Rol usuario (Estudiante): registro libre.
-- Rol trabajador (Personal Administrativo): requiere código de registro.
-- Rol supervisor (Autoridad): requiere código de registro.
-
-| Rol | Email (Ejemplo) | Password (Ejemplo) | Código Secreto |
+| Endpoint | Método | Rol | Descripción |
 | :--- | :--- | :--- | :--- |
-| Usuario | `estudiante.demo@utec.edu.pe` | `password123` | N/A |
-| Trabajador | `trabajador.demo@utec.edu.pe` | `password123` | `EL_CODIGO_SECRETO_DE_TRABAJADOR` |
-| Supervisor | `supervisor.demo@utec.edu.pe` | `password123` | `EL_CODIGO_SECRETO_DE_SUPERVISOR` |
+| `/incidentes` | `POST` | `usuario` | Crea incidente. Dispara Airflow y WebSocket. |
+| `/incidentes` | `GET` | Todos | Lista incidentes (filtrado por rol). |
+| `/incidentes/:id/asignar` | `PATCH` | `trabajador` | Asigna el incidente al trabajador. |
+| `/incidentes/:id/resolver` | `PATCH` | `trabajador` | Marca como `resuelto`. |
+| `/incidentes/:id/historial` | `GET` | Todos | Muestra la trazabilidad completa (Req. 7). |
 
-Los códigos reales se gestionan mediante variables de entorno y no se publican en el repositorio.
+---
 
-## 🧪 Guías de prueba (Postman/Thunder Client)
-
-Usa la URL Base de la API (Fargate) para todas las pruebas y recuerda enviar el Token en el header: `Authorization: Bearer <token>`.
+## 🧪 Guía de Pruebas (Postman)
 
 ### A. Disparo de Orquestación (Requisito 5)
-1) Acción: `POST /incidentes` (con token JWT).  
-2) Resultado: el backend llama a la API de Airflow.  
-3) Verificación: el DAG `clasificar_incidente` se ejecuta en `http://3.236.149.2:8081`.
-
-Ejemplo de body:
-```json
-{
-  "tipo": "infraestructura",
-  "ubicacion": "Pabellón B, Piso 3",
-  "descripcion": "La luz del pasillo parpadea.",
-  "urgencia": "media"
-}
-```
+1.  Acción: `POST /incidentes` (con token de usuario).
+    ```json
+    {
+      "tipo": "seguridad",
+      "ubicacion": "Sótano 2",
+      "descripcion": "Prueba de integración Fargate.",
+      "urgencia": "alta"
+    }
+    ```
+2.  **Verificación:**
+    * Postman devuelve `201 Created`.
+    * En la **UI de Airflow**, el DAG `clasificar_incidente` muestra un círculo verde (Success).
 
 ### B. Flujo de Tiempo Real (Requisito 3)
-1) Conecta dos clientes WebSocket (uno con token de usuario, otro con token de trabajador) al endpoint WSS.  
-2) Ejecuta `POST /incidentes` con el token de usuario.  
-3) Verificación: el cliente de trabajador recibe `action: "nuevo_incidente"`.
+1.  Conecta un cliente WebSocket a la URL WSS.
+2.  Crea un incidente mediante la API REST.
+3.  **Verificación:** El cliente WebSocket recibe instantáneamente un mensaje JSON `action: "nuevo_incidente"`.
 
-### C. Registro Seguro (Requisito 1)
-1) Acción: `POST /auth/register`.  
-2) Verificación (éxito): registra un trabajador con el `registrationCode` correcto.  
-3) Verificación (fallo): intenta registrar un supervisor sin código o con código incorrecto; la API debe responder `401 Unauthorized`.
+### C. Historial y Trazabilidad (Requisito 7)
+1.  Acción: `GET /incidentes/:id/historial` (usando el ID generado).
+2.  **Verificación:** Recibes un array con todos los eventos (CREADO, ASIGNADO, RESUELTO) con fecha y responsable.
 
-Ejemplos:
-```json
-{
-  "email": "trabajador.demo@utec.edu.pe",
-  "password": "password123",
-  "nombre": "Trabajador Demo",
-  "rol": "trabajador",
-  "registrationCode": "EL_CODIGO_SECRETO_DE_TRABAJADOR"
-}
-```
-```json
-{
-  "email": "supervisor.demo@utec.edu.pe",
-  "password": "password123",
-  "nombre": "Supervisor Demo",
-  "rol": "supervisor",
-  "registrationCode": "EL_CODIGO_SECRETO_DE_SUPERVISOR"
-}
-```
+---
 
-## ⚙️ Guía de despliegue (completado)
+## ⚙️ Proceso de Despliegue Realizado
 
-El despliegue se orquesta con CloudFormation (ECS Fargate) y Serverless Framework (API WebSocket).
-
-1) Clonar e instalar dependencias: `npm install`.  
-2) Configurar credenciales de AWS Academy en `~/.aws/credentials`.  
-3) Desplegar Serverless:
-   - En la raíz (infra principal) y en `services-websocket/`: `sls deploy`.  
-4) Desplegar Fargate:
-   ```bash
-   chmod +x deploy_fargate.sh
-   ./deploy_fargate.sh
-   ```
-Este script construye la imagen Docker, la sube a ECR y crea/actualiza el Cluster, ALB y Servicio ECS.
-
-
+1.  **Dependencias:** `npm install`.
+2.  **Base de Datos:** `sls deploy` (Crea tablas DynamoDB).
+3.  **WebSockets:** `cd services-websocket && sls deploy`.
+4.  **Airflow (Fargate):** `./deploy_airflow_fargate.sh` (Construye imagen, sube a ECR, despliega stack complejo en ECS).
+    * *Nota:* Requiere una máquina con al menos 4GB de RAM para construir la imagen Docker (usamos una `t3.large` temporal).
+5.  **Backend (Fargate):** `./deploy_fargate.sh` (Conecta el backend con la URL de Airflow generada).
