@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Despliegue de Airflow en Fargate (Con inicialización de DB y Workers)'
+Description: 'Despliegue de Airflow en Fargate (Con init, worker y DAGs locales) - V5 FINAL'
 
 Parameters:
   VpcId:
@@ -15,7 +15,7 @@ Parameters:
   ImageUri:
     Type: String
   S3DagsPath:
-    Type: String
+    Type: String # Se mantiene por compatibilidad, pero NO SE USA en la config de Airflow
 
 Resources:
   LogGroup:
@@ -59,13 +59,13 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref TargetGroup
 
-  # --- Definición de Tarea con 6 Contenedores, 8GB RAM y Init ---
+  # --- Definición de Tarea ---
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: alerta-utec-airflow-task
       Cpu: 2048       # 2 vCPU
-      Memory: 8192    # 8 GB RAM
+      Memory: 8192    # 8 GB RAM (Necesario para 6 contenedores)
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -73,7 +73,7 @@ Resources:
       TaskRoleArn: !Ref TaskRoleArn
       
       ContainerDefinitions:
-        # --- Contenedor 1: Postgres ---
+        # --- 1. Postgres ---
         - Name: postgres
           Image: postgres:13
           PortMappings:
@@ -95,10 +95,10 @@ Resources:
             Command: [ "CMD-SHELL", "pg_isready -U airflow || exit 1" ]
             Interval: 15
             Timeout: 5
-            StartPeriod: 120   # 2 minutos de gracia
+            StartPeriod: 120   # 2 min de gracia para arrancar
             Retries: 5
 
-        # --- Contenedor 2: Redis ---
+        # --- 2. Redis ---
         - Name: redis
           Image: redis:latest
           PortMappings:
@@ -116,10 +116,10 @@ Resources:
             StartPeriod: 30
             Retries: 3
         
-        # --- Contenedor 3: Airflow Init (NUEVO - Inicializa la BD) ---
+        # --- 3. Airflow Init (Inicializa DB y Usuario) ---
         - Name: airflow-init
           Image: !Ref ImageUri
-          Essential: false   # No es esencial, solo corre una vez y sale
+          Essential: false   # Corre una vez y muere (exit 0)
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -140,11 +140,11 @@ Resources:
               Value: redis://localhost:6379/0
             - Name: AIRFLOW__CELERY__RESULT_BACKEND
               Value: db+postgresql://airflow:airflow@localhost:5432/airflow
+            # --- CORRECCIÓN: Usamos ruta local ---
             - Name: AIRFLOW__CORE__DAGS_FOLDER
-              Value: !Ref S3DagsPath
+              Value: /opt/airflow/dags
             - Name: AIRFLOW__CORE__LOAD_EXAMPLES
               Value: 'False'
-          # Comando que inicializa y crea el usuario admin
           Command:
             - bash
             - -c
@@ -159,7 +159,7 @@ Resources:
                 --email admin@example.com || true
               echo "Inicialización completa"
 
-        # --- Contenedor 4: Airflow Webserver ---
+        # --- 4. Airflow Webserver ---
         - Name: airflow-webserver
           Image: !Ref ImageUri
           Essential: true
@@ -171,7 +171,6 @@ Resources:
               awslogs-group: !Ref LogGroup
               awslogs-region: !Ref 'AWS::Region'
               awslogs-stream-prefix: airflow-webserver
-          # Espera a que el contenedor 'init' termine con éxito
           DependsOn:
             - ContainerName: airflow-init
               Condition: SUCCESS
@@ -184,13 +183,14 @@ Resources:
               Value: redis://localhost:6379/0
             - Name: AIRFLOW__CELERY__RESULT_BACKEND
               Value: db+postgresql://airflow:airflow@localhost:5432/airflow
+            # --- CORRECCIÓN: Usamos ruta local ---
             - Name: AIRFLOW__CORE__DAGS_FOLDER
-              Value: !Ref S3DagsPath
+              Value: /opt/airflow/dags
             - Name: AIRFLOW__CORE__LOAD_EXAMPLES
               Value: 'False'
           Command: [ "webserver" ]
 
-        # --- Contenedor 5: Airflow Scheduler ---
+        # --- 5. Airflow Scheduler ---
         - Name: airflow-scheduler
           Image: !Ref ImageUri
           Essential: true
@@ -212,13 +212,14 @@ Resources:
               Value: redis://localhost:6379/0
             - Name: AIRFLOW__CELERY__RESULT_BACKEND
               Value: db+postgresql://airflow:airflow@localhost:5432/airflow
+            # --- CORRECCIÓN: Usamos ruta local ---
             - Name: AIRFLOW__CORE__DAGS_FOLDER
-              Value: !Ref S3DagsPath
+              Value: /opt/airflow/dags
             - Name: AIRFLOW__CORE__LOAD_EXAMPLES
               Value: 'False'
           Command: [ "scheduler" ]
 
-        # --- Contenedor 6: Celery Worker (NUEVO - Ejecuta las tareas) ---
+        # --- 6. Airflow Worker ---
         - Name: airflow-worker
           Image: !Ref ImageUri
           Essential: true
@@ -240,8 +241,9 @@ Resources:
               Value: redis://localhost:6379/0
             - Name: AIRFLOW__CELERY__RESULT_BACKEND
               Value: db+postgresql://airflow:airflow@localhost:5432/airflow
+            # --- CORRECCIÓN: Usamos ruta local ---
             - Name: AIRFLOW__CORE__DAGS_FOLDER
-              Value: !Ref S3DagsPath
+              Value: /opt/airflow/dags
             - Name: AIRFLOW__CORE__LOAD_EXAMPLES
               Value: 'False'
           Command: [ "celery", "worker" ]
@@ -266,7 +268,6 @@ Resources:
         - TargetGroupArn: !Ref TargetGroup
           ContainerName: airflow-webserver
           ContainerPort: 8080
-      # Período de gracia de 10 minutos para que todo se estabilice
       HealthCheckGracePeriodSeconds: 600
 
 Outputs:
